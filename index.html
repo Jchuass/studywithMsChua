@@ -2861,6 +2861,93 @@ function renderNeuroContent(){
   // Auto-generate 100 questions per subject per level in background
   autoGenerateOnLoad();
 })();
+  <!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Study with Ms Chua</title>
+</head>
+<body>
+  <h1>Exam Question Bank</h1>
+
+  <!-- Display questions -->
+  <div id="questions"></div>
+
+  <!-- Form to add new questions -->
+  <h2>Add a New Question</h2>
+  <form id="questionForm">
+    <label>Subject: <input type="text" id="subject" required></label><br>
+    <label>Level: <input type="text" id="level" required></label><br>
+    <label>Question: <textarea id="question_text" required></textarea></label><br>
+    <label>Type:
+      <select id="type">
+        <option value="MCQ">MCQ</option>
+        <option value="Essay">Essay</option>
+        <option value="Short Answer">Short Answer</option>
+      </select>
+    </label><br>
+    <label>Difficulty: <input type="text" id="difficulty"></label><br>
+    <button type="submit">Add Question</button>
+  </form>
+
+  <!-- Supabase script -->
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+
+    // Your actual Supabase credentials
+    const supabaseUrl = 'https://mwwdiarsgsblmgesjrpi.supabase.co'
+    const supabaseKey = 'sb_publishable__kAP1aaKtwNYs7dPtDDKZQ_uUo7aVLT'
+    const supabase = createClient(supabaseUrl, supabaseKey)
+
+    // Load questions
+    async function loadQuestions() {
+      let { data, error } = await supabase
+        .from('questions')
+        .select('*')
+        .order('id', { ascending: false })
+        .limit(10)
+
+      if (error) {
+        console.error(error)
+      } else {
+        const container = document.getElementById('questions')
+        container.innerHTML = ''
+        data.forEach(q => {
+          const div = document.createElement('div')
+          div.innerHTML = `<strong>${q.subject} (${q.level})</strong>: ${q.question_text}`
+          container.appendChild(div)
+        })
+      }
+    }
+
+    // Handle form submission
+    document.getElementById('questionForm').addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const subject = document.getElementById('subject').value
+      const level = document.getElementById('level').value
+      const question_text = document.getElementById('question_text').value
+      const type = document.getElementById('type').value
+      const difficulty = document.getElementById('difficulty').value
+
+      let { error } = await supabase.from('questions').insert([
+        { subject, level, question_text, type, difficulty }
+      ])
+
+      if (error) {
+        alert('Error adding question: ' + error.message)
+      } else {
+        alert('Question added successfully!')
+        loadQuestions()
+        document.getElementById('questionForm').reset()
+      }
+    })
+
+    // Initial load
+    loadQuestions()
+  </script>
+</body>
+</html>
+
 </script>
 </body>
 </html>
