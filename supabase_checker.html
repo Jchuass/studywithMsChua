@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Supabase Connection Checker</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:system-ui,sans-serif;background:#f5f5f3;padding:1.5rem;max-width:800px;margin:0 auto;}
+.hero{background:linear-gradient(135deg,#185FA5,#4ECDC4);border-radius:12px;padding:1.25rem;color:white;margin-bottom:1rem;text-align:center;}
+h1{font-size:18px;font-weight:700;margin-bottom:.25rem;}
+p{font-size:13px;opacity:.9;}
+.card{background:white;border-radius:12px;border:1px solid rgba(0,0,0,.1);padding:1.25rem;margin-bottom:1rem;}
+.card h2{font-size:14px;font-weight:700;margin-bottom:.75rem;color:#333;}
+.result{border-radius:8px;padding:.75rem 1rem;font-size:13px;line-height:1.7;margin-bottom:.5rem;}
+.ok{background:#EAF3DE;border-left:4px solid #2e7d32;color:#1b5e20;}
+.err{background:#fff0f0;border-left:4px solid #cc3333;color:#a32d2d;}
+.info{background:#E6F1FB;border-left:4px solid #185FA5;color:#0d47a1;}
+.warn{background:#FFF8E8;border-left:4px solid #e65100;color:#bf360c;}
+button{padding:10px 20px;background:#185FA5;color:white;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;margin-right:8px;margin-bottom:8px;}
+button:hover{background:#0d47a1;}
+button:disabled{opacity:.5;cursor:not-allowed;}
+.count-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-top:.75rem;}
+.count-cell{background:#f9f9f7;border-radius:8px;padding:10px;font-size:12px;border:1px solid rgba(0,0,0,.08);}
+.count-cell .num{font-size:20px;font-weight:800;color:#FF6B35;}
+.count-cell .lbl{color:#888;margin-top:2px;}
+pre{background:#111;color:#e0e0e0;border-radius:8px;padding:1rem;font-size:11px;overflow-x:auto;max-height:300px;overflow-y:auto;}
+input{width:100%;padding:8px 10px;border:1.5px solid #ddd;border-radius:8px;font-size:13px;margin-bottom:.5rem;}
+label{font-size:12px;font-weight:700;color:#555;display:block;margin-bottom:4px;}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>🔍 Supabase Connection Checker</h1>
+  <p>Diagnoses exactly why questions aren't showing in your app</p>
+</div>
+
+<div class="card">
+  <h2>⚙️ Connection Details</h2>
+  <label>Supabase URL</label>
+  <input id="sbUrl" value="https://mwwdiarsgsblmgesjrpi.supabase.co"/>
+  <label>Supabase Anon Key</label>
+  <input id="sbKey" value="sb_publishable__kAP1aaKtwNYs7dPtDDKZQ_uUo7aVLT"/>
+  <div style="margin-top:.5rem;">
+    <button onclick="runAllChecks()">▶ Run All Checks</button>
+    <button onclick="loadSampleQuestions()">📖 Load Sample Questions</button>
+    <button onclick="checkRLS()">🔒 Check RLS Policies</button>
+  </div>
+</div>
+
+<div class="card" id="resultsCard" style="display:none;">
+  <h2>📋 Results</h2>
+  <div id="results"></div>
+</div>
+
+<div class="card" id="countsCard" style="display:none;">
+  <h2>📊 Question Counts by Level &amp; Subject</h2>
+  <div id="countGrid"></div>
+</div>
+
+<div class="card" id="sampleCard" style="display:none;">
+  <h2>📝 Sample Questions (first 3)</h2>
+  <pre id="sampleData"></pre>
+</div>
+
+<script>
+function url(){return document.getElementById('sbUrl').value.trim().replace(/\/$/,'');}
+function key(){return document.getElementById('sbKey').value.trim();}
+function headers(){return{'apikey':key(),'Authorization':'Bearer '+key()};}
+
+function addResult(msg,cls='info'){
+  const d=document.getElementById('results');
+  d.innerHTML+=`<div class="result ${cls}">${msg}</div>`;
+  document.getElementById('resultsCard').style.display='block';
+}
+
+function clearResults(){
+  document.getElementById('results').innerHTML='';
+  document.getElementById('countGrid').innerHTML='';
+  document.getElementById('resultsCard').style.display='none';
+  document.getElementById('countsCard').style.display='none';
+  document.getElementById('sampleCard').style.display='none';
+}
+
+async function runAllChecks(){
+  clearResults();
+  addResult('🔄 Starting checks...','info');
+
+  // CHECK 1: Basic connectivity
+  addResult('──────────────────────────────────','info');
+  addResult('CHECK 1: Basic connection to Supabase','info');
+  try{
+    const res = await fetch(url()+'/rest/v1/',{headers:headers()});
+    addResult('Connection: HTTP '+res.status+(res.ok?' ✅':' ❌'), res.ok?'ok':'err');
+    if(!res.ok){
+      const t=await res.text();
+      addResult('Error response: '+t.slice(0,200),'err');
+      addResult('⚠️ Check your Supabase URL and Key are correct','warn');
+      return;
+    }
+  }catch(e){
+    addResult('❌ Cannot connect: '+e.message,'err');
+    addResult('⚠️ This could be a network issue or wrong URL','warn');
+    return;
+  }
+
+  // CHECK 2: Table exists
+  addResult('──────────────────────────────────','info');
+  addResult('CHECK 2: Does the "questions" table exist?','info');
+  try{
+    const res = await fetch(url()+'/rest/v1/questions?limit=1',{headers:headers()});
+    if(res.status===404){
+      addResult('❌ Table "questions" NOT FOUND','err');
+      addResult('Fix: Run the SQL schema in Supabase → SQL Editor','warn');
+      return;
+    }
+    if(res.status===401||res.status===403){
+      addResult('❌ Permission denied ('+res.status+') — RLS policy blocking read access','err');
+      addResult('Fix: Run this in SQL Editor: CREATE POLICY "allow_read" ON questions FOR SELECT USING (true);','warn');
+      return;
+    }
+    addResult('Table "questions" exists ✅','ok');
+    const data=await res.json();
+    addResult('Sample row returned: '+(data.length>0?'✅ Yes':'⚠️ Table is empty'),'info');
+  }catch(e){
+    addResult('❌ Error checking table: '+e.message,'err');
+    return;
+  }
+
+  // CHECK 3: Count questions
+  addResult('──────────────────────────────────','info');
+  addResult('CHECK 3: How many questions are in the database?','info');
+  try{
+    const res = await fetch(url()+'/rest/v1/questions?select=id',{
+      headers:{...headers(),'Prefer':'count=exact','Range-Unit':'items','Range':'0-0'}
+    });
+    const total = res.headers.get('content-range');
+    if(total){
+      const count = total.split('/')[1];
+      addResult('Total questions in database: <strong>'+count+'</strong> '+(parseInt(count)>0?'✅':'⚠️ Database is empty — run the uploader'),parseInt(count)>0?'ok':'warn');
+    }
+    // Also try question_counts view
+    const res2 = await fetch(url()+'/rest/v1/question_counts',{headers:headers()});
+    if(res2.ok){
+      const counts=await res2.json();
+      addResult('question_counts view working ✅ — '+counts.length+' level/subject combinations found','ok');
+      renderCounts(counts);
+    } else {
+      addResult('question_counts view not found ('+res2.status+') — using direct count instead','warn');
+      await renderCountsDirect();
+    }
+  }catch(e){addResult('Error counting: '+e.message,'err');}
+
+  // CHECK 4: CORS
+  addResult('──────────────────────────────────','info');
+  addResult('CHECK 4: CORS (can this browser access Supabase?)','info');
+  try{
+    const res = await fetch(url()+'/rest/v1/questions?limit=1',{
+      method:'GET',headers:headers(),mode:'cors'
+    });
+    addResult('CORS: ✅ No CORS errors — browser can access Supabase fine','ok');
+  }catch(e){
+    if(e.message.includes('CORS')||e.message.includes('NetworkError')){
+      addResult('❌ CORS error — Supabase is blocking this origin','err');
+      addResult('Fix: Supabase → Settings → API → Add your domain to Allowed Origins','warn');
+    } else {
+      addResult('CORS check: '+e.message,'warn');
+    }
+  }
+
+  addResult('──────────────────────────────────','info');
+  addResult('All checks complete. See results above.','info');
+}
+
+async function renderCounts(counts){
+  const card=document.getElementById('countsCard');
+  const grid=document.getElementById('countGrid');
+  card.style.display='block';
+  const levels=['P5','P6','Sec3','Sec4','P4','Sec1','Sec2','P3','P2','P1'];
+  const subjects=['Maths','English','Science','Chinese','Malay','Tamil'];
+  const lookup={};
+  counts.forEach(r=>lookup[r.level+':'+r.subject]=parseInt(r.total)||0);
+  let html='<div class="count-grid">';
+  for(const lv of levels){
+    for(const subj of subjects){
+      const n=lookup[lv+':'+subj]||0;
+      const color=n>=100?'#2e7d32':n>0?'#FF6B35':'#aaa';
+      html+=`<div class="count-cell"><div class="num" style="color:${color}">${n}</div><div class="lbl">${lv} ${subj}</div></div>`;
+    }
+  }
+  html+='</div>';
+  const total=Object.values(lookup).reduce((s,n)=>s+n,0);
+  html=`<div style="font-size:14px;font-weight:700;margin-bottom:.75rem;">Total: <span style="color:#FF6B35">${total.toLocaleString()}</span> questions</div>`+html;
+  grid.innerHTML=html;
+}
+
+async function renderCountsDirect(){
+  try{
+    const res = await fetch(url()+'/rest/v1/questions?select=level,subject&limit=50000',{headers:headers()});
+    if(!res.ok) return;
+    const data=await res.json();
+    const counts={};
+    data.forEach(r=>{const k=r.level+':'+r.subject;counts[k]=(counts[k]||0)+1;});
+    const arr=Object.entries(counts).map(([k,v])=>{const[level,subject]=k.split(':');return{level,subject,total:v};});
+    renderCounts(arr);
+  }catch{}
+}
+
+async function loadSampleQuestions(){
+  clearResults();
+  addResult('Loading first 3 questions from Supabase...','info');
+  try{
+    const res = await fetch(url()+'/rest/v1/questions?limit=3&order=created_at.desc',{headers:headers()});
+    if(!res.ok){addResult('❌ Error: HTTP '+res.status,'err');return;}
+    const data=await res.json();
+    if(!data.length){addResult('⚠️ No questions found — database is empty','warn');return;}
+    addResult('✅ Found '+data.length+' questions — database connection working!','ok');
+    document.getElementById('sampleCard').style.display='block';
+    document.getElementById('sampleData').textContent=JSON.stringify(data,null,2);
+    addResult('✅ Questions are in Supabase. If they\'re not showing in the app, the issue is in the app\'s loading code.','ok');
+  }catch(e){addResult('❌ '+e.message,'err');}
+}
+
+async function checkRLS(){
+  clearResults();
+  addResult('Checking RLS policies on questions table...','info');
+  try{
+    // Try reading without auth
+    const res1 = await fetch(url()+'/rest/v1/questions?limit=1');
+    addResult('Read without auth key: HTTP '+res1.status+(res1.status===200?' ✅ (RLS allows public read)':(res1.status===401?' ⚠️ Need API key':' see below')),'info');
+
+    // Try reading with anon key
+    const res2 = await fetch(url()+'/rest/v1/questions?limit=1',{headers:headers()});
+    addResult('Read with anon key: HTTP '+res2.status+(res2.ok?' ✅ Working correctly':'❌ Blocked by RLS'),res2.ok?'ok':'err');
+
+    if(!res2.ok){
+      addResult('Fix: Run this in Supabase SQL Editor:','warn');
+      addResult(`DROP POLICY IF EXISTS "Public can read questions" ON questions;
+CREATE POLICY "Public can read questions" ON questions FOR SELECT USING (true);
+GRANT SELECT ON questions TO anon;`,'warn');
+    }
+  }catch(e){addResult('❌ '+e.message,'err');}
+}
+</script>
+</body>
+</html>
